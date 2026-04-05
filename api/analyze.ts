@@ -1,6 +1,187 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
+// 宮位名稱映射（地支 → 宮位名稱）
+const PALACE_NAMES = [
+  '命宮', '兄弟宮', '夫妻宮', '子女宮',
+  '財帛宮', '疾厄宮', '遷移宮', '交友宮',
+  '事業宮', '田宅宮', '福德宮', '父母宮',
+] as const;
+
+const DIZHI_ORDER = ['寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥', '子', '丑'] as const;
+
+/**
+ * 根據命宮地支和當前地支，計算宮位名稱
+ */
+function getPalaceName(mingGongDizhi: string, currentDizhi: string): string {
+  const mingGongIndex = DIZHI_ORDER.indexOf(mingGongDizhi as any);
+  const currentIndex = DIZHI_ORDER.indexOf(currentDizhi as any);
+  
+  // 逆時針排列：命宮是起點，往前數（地支往後）
+  const nameIndex = (currentIndex - mingGongIndex + 12) % 12;
+  return PALACE_NAMES[nameIndex];
+}
+
+/**
+ * 構建宮位信息字符串
+ */
+function buildPalaceInfo(chartData: any): string {
+  const { starsByDizhi, mingGongDizhi } = chartData;
+  
+  if (!starsByDizhi || !mingGongDizhi) {
+    return '無法構建宮位信息';
+  }
+
+  const palaceInfo: string[] = [];
+
+  for (const dizhi of DIZHI_ORDER) {
+    const palaceName = getPalaceName(mingGongDizhi, dizhi);
+    const stars = starsByDizhi[dizhi] || [];
+    
+    let starInfo = '';
+    if (stars.length === 0) {
+      starInfo = '空宮';
+    } else {
+      starInfo = stars
+        .map((star: any) => {
+          const strength = star.strength ? `(${star.strength})` : '';
+          const sihua = star.sihua ? `【${star.sihua}】` : '';
+          return `${star.name}${strength}${sihua}`;
+        })
+        .join('、');
+    }
+
+    palaceInfo.push(`【${palaceName}】（${dizhi}）：${starInfo}`);
+  }
+
+  return palaceInfo.join('\n');
+}
+
+/**
+ * 構建完整的提示詞
+ */
+function buildPrompt(chartData: any): string {
+  const palaceInfo = buildPalaceInfo(chartData);
+  
+  const {
+    solarDate,
+    lunarDate,
+    gender,
+    mingGongDizhi,
+    shenGongDizhi,
+    fiveElementsBureau,
+    mingZhu,
+    shenZhu,
+    yearGanZhi,
+    monthGanZhi,
+    dayGanZhi,
+    hourGanZhi,
+  } = chartData;
+
+  return `你是一位資深的紫微斗數命理師，擁有30年以上的實踐經驗。請根據以下命盤數據進行深度、全面的命理分析。
+
+【重要提示】
+以下列出的宮位信息是命盤的準確數據，請根據這些信息進行分析，不要推測或修改宮位位置。
+如果某個宮位顯示「空宮」，說明該宮位確實沒有主星，請根據宮位的輔星進行分析。
+
+【命盤基本信息】
+陽曆生日：${solarDate}
+農曆生日：${lunarDate}
+性別：${gender === 'male' ? '男' : '女'}
+命宮地支：${mingGongDizhi}
+身宮地支：${shenGongDizhi}
+五行局：${fiveElementsBureau}
+命主：${mingZhu}
+身主：${shenZhu}
+年干支：${yearGanZhi}
+月干支：${monthGanZhi}
+日干支：${dayGanZhi}
+時干支：${hourGanZhi}
+
+【命盤各宮位信息】
+${palaceInfo}
+
+【完整命盤數據】
+${JSON.stringify(chartData, null, 2)}
+
+【分析要求】
+請按照以下結構進行詳細分析：
+
+1. 【命盤基本資訊】
+   - 陽曆生日、農曆生日、性別
+   - 命宮、身宮、五行局、命主、身主
+   - 年干四化
+
+2. 【命宮分析】（最重要）
+   - 命宮主星及其特質
+   - 性格特徵、人生底層架構
+   - 優勢與挑戰
+
+3. 【性格與氣質】
+   - 內在性格特質
+   - 外在表現與人際風格
+   - 情緒特點與應對方式
+
+4. 【事業前景與財富運勢】
+   - 事業宮分析
+   - 適合的職業方向
+   - 財富積累能力與方式
+   - 事業發展的關鍵期
+
+5. 【感情與婚姻】
+   - 夫妻宮分析
+   - 感情運勢與婚配特點
+   - 伴侶特質與相處建議
+   - 婚姻穩定性評估
+
+6. 【家庭與人倫】
+   - 父母宮分析
+   - 兄弟宮分析
+   - 子女宮分析
+   - 交友宮分析
+
+7. 【健康與身體】
+   - 疾厄宮分析
+   - 先天體質特點
+   - 易患疾病傾向
+   - 保健建議
+
+8. 【遷移與環境】
+   - 遷移宮分析
+   - 適合的居住環境
+   - 出行與移居運勢
+
+9. 【福德與精神】
+   - 福德宮分析
+   - 精神世界與修養
+   - 快樂源泉與滿足感
+
+10. 【田宅與資產】
+    - 田宅宮分析
+    - 房產運勢
+    - 家庭資產累積
+
+11. 【流年運勢預測】（2026-2030）
+    - 每一年的運勢概況
+    - 吉凶時期
+    - 建議與應對策略
+
+12. 【綜合建議】
+    - 人生發展方向
+    - 需要特別注意的事項
+    - 開運建議
+
+【輸出格式要求】
+- 使用清晰的中文，避免任何技術符號、代碼或格式標籤
+- 每個分析部分用【】標記標題
+- 內容要具體、實用、易於理解
+- 避免使用 Markdown 符號、JSON 格式、轉義字符等
+- 直接輸出純文本，段落之間用空行分隔
+- 每個維度至少 200-300 字的深入分析
+
+請開始詳細分析：`;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -23,7 +204,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
       generationConfig: {
-        // 🚨 移除了 JSON 限制，讓它自由發揮純文字
         temperature: 0.7,
       },
       safetySettings: [
@@ -34,41 +214,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ],
     });
 
-    const systemInstruction = `你是資深的紫微斗數與易經命理分析官。
-你的職責是基於用戶提供的命盤數據進行深度分析，並整合《紫微斗數全書》與《周易》的古籍智慧。
-1. 基於用戶提供的命盤數據進行深度分析
-2. 整合《紫微斗數全書》與《周易》的古籍智慧
-3. 提供具體、可行的建議
+    const prompt = buildPrompt(chartData);
+    console.log('[Analyze] Prompt length:', prompt.length);
 
-分析維度：
-- 性格特質與人生底層架構
-- 事業前景與財富運勢
-- 感情婚姻與人際關係
-- 與父母與兄弟姊妹的關係
-- 健康情況與該如何處理
-- 2026-2030 年流年運勢預測
-
-【嚴格排版規定 - 非常重要】：
-1. 絕對不要輸出 JSON 格式！不要有任何 {} 或 "" 等程式碼符號。
-2. 絕對不要使用 Markdown 符號（如 #, *, -, \` 等）。
-3. 請使用「純中文長篇文章」的形式撰寫。
-4. 段落標題請務必使用全形中括號【】，例如：【性格特質與底層架構】、【事業前景與財富運勢】、【感情婚姻與人際關係】、【父母與手足關係】、【2026-2030 流年運勢】。
-5. 每個段落之間請空一行，保持版面乾淨易讀。`;
-
-    const userPrompt = `請分析以下命盤數據，給出一份排版整齊、優美的中文命理分析報告：\n${JSON.stringify(chartData)}`;
-
-    const response = await model.generateContent([
-      { text: systemInstruction },
-      { text: userPrompt },
-    ]);
-
+    const response = await model.generateContent(prompt);
     const responseText = response.response.text();
 
     const endTime = Date.now();
     const responseTime = endTime - startTime;
     const tokensUsed = Math.ceil(responseText.length / 4);
 
-    // 評估風險等級 (直接從純文字中判斷)
+    // 評估風險等級
     let warningLevel: 'low' | 'medium' | 'high' = 'low';
     if (responseText.includes('化忌') || responseText.includes('陷地') || responseText.includes('煞星')) {
       warningLevel = 'high';
@@ -82,7 +238,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       low: '命盤整體風險較低，可按計畫推進。',
     };
 
-    // 將「純文字報告」與「系統資訊」包裝後回傳給前端
     return res.status(200).json({
       analysis_text: responseText,
       metadata: {
