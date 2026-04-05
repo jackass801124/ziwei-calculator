@@ -45,6 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - 事業前景與財富運勢
 - 感情婚姻與人際關係
 - 與父母與兄弟姊妹的關係
+- 健康情況與該如何處理
 - 2026-2030 年流年運勢預測
 
 【嚴格排版規定 - 非常重要】：
