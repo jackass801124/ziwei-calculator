@@ -82,16 +82,38 @@ ${JSON.stringify(chartData, null, 2)}
     ]);
 
     const responseText = response.response.text();
-    // 清理 Gemini 回傳的 JSON 中可能包含的控制字元
-    const sanitizedText = responseText.replace(/[\x00-\x1F\x7F]/g, (ch: string) => {
-      if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
-      return '';
-    });
-    const analysisData = JSON.parse(sanitizedText);
 
     const endTime = Date.now();
     const responseTime = endTime - startTime;
     const tokensUsed = Math.ceil(responseText.length / 4);
+
+    // 嘗試解析 Gemini 回傳的 JSON，包含多層修復邏輯
+    let analysisData: Record<string, unknown>;
+    try {
+      analysisData = JSON.parse(responseText);
+    } catch {
+      // 第一次修復：移除控制字元後重試
+      const sanitized = responseText.replace(/[\x00-\x1F\x7F]/g, (ch: string) => {
+        if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
+        return '';
+      });
+      try {
+        analysisData = JSON.parse(sanitized);
+      } catch {
+        // 第二次修復：嘗試提取 JSON 物件（處理 Gemini 在 JSON 前後加入額外文字的情況）
+        const jsonMatch = sanitized.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            analysisData = JSON.parse(jsonMatch[0]);
+          } catch {
+            // 所有修復都失敗，將原始文字作為分析結果回傳
+            analysisData = { raw_analysis: responseText };
+          }
+        } else {
+          analysisData = { raw_analysis: responseText };
+        }
+      }
+    }
 
     // 評估風險等級
     const analysisText = JSON.stringify(analysisData).toLowerCase();
