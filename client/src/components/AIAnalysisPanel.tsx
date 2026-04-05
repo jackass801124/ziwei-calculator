@@ -54,9 +54,14 @@ export default function AIAnalysisPanel({ chart }: AIAnalysisPanelProps) {
     }
   };
 
+// --- 處理資料提取 (自動尋找資料根目錄) ---
   const getSection = (keyEn: string, keyZh: string) => {
     if (!analysisData) return null;
-    return analysisData?.analysis?.[keyEn] || analysisData?.analysis?.[keyZh] || analysisData?.[keyEn] || analysisData?.[keyZh];
+    
+    // 找出真正的資料層：不管 Gemini 是包在 analysis_result、analysis 還是直接放在外層
+    const root = analysisData?.analysis_result || analysisData?.analysis || analysisData;
+    
+    return root?.[keyEn] || root?.[keyZh];
   };
 
   const extractText = (data: any): string => {
