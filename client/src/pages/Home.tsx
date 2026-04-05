@@ -5,7 +5,7 @@
  * 整合輸入表單、命盤顯示、偵錯面板、Unit Tests
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import InputForm from '../components/InputForm';
 import ZiWeiChart from '../components/ZiWeiChart';
 import DebugPanel from '../components/DebugPanel';
@@ -18,14 +18,6 @@ export default function Home() {
   const [chart, setChart] = useState<ChartResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
-  const [apiKeyError, setApiKeyError] = React.useState(!apiKey);
-
-  React.useEffect(() => {
-    if (!apiKey) {
-      setApiKeyError(true);
-    }
-  }, [apiKey]);
 
   const handleSubmit = useCallback((input: ChartInput) => {
     setIsLoading(true);
@@ -167,7 +159,7 @@ export default function Home() {
                 
                 {/* AI 分析面板 */}
                 <div className="mt-6">
-                  <AIAnalysisPanel chart={chart} apiKey={apiKey} />
+                  <AIAnalysisPanel chart={chart} />
                 </div>
 
                 <DebugPanel chart={chart} />

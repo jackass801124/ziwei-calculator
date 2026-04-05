@@ -8,22 +8,20 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import type { ChartResult } from '@/lib/stars';
-import { buildZiWeiPrompt } from '@/lib/promptBuilder';
-import { initGeminiService } from '@/lib/gemini_service';
 
 interface AIAnalysisPanelProps {
   chart: ChartResult | null;
-  apiKey: string;
+  apiKey?: string;
 }
 
-export default function AIAnalysisPanel({ chart, apiKey }: AIAnalysisPanelProps) {
+export default function AIAnalysisPanel({ chart }: AIAnalysisPanelProps) {
   const [analysis, setAnalysis] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
 
   const handleAnalyze = async () => {
-    if (!chart || !apiKey) {
-      setError('缺少命盤數據或 API Key');
+    if (!chart) {
+      setError('缺少命盤數據');
       return;
     }
 
@@ -32,9 +30,19 @@ export default function AIAnalysisPanel({ chart, apiKey }: AIAnalysisPanelProps)
     setAnalysis('');
 
     try {
-      const geminiService = initGeminiService(apiKey);
-      const result = await geminiService.analyzeChart(chart);
-      setAnalysis(JSON.stringify(result.analysis, null, 2));
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chartData: chart }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || `HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      setAnalysis(JSON.stringify(result, null, 2));
     } catch (err) {
       setError(err instanceof Error ? err.message : '分析失敗，請重試');
       console.error('分析錯誤:', err);
@@ -51,7 +59,7 @@ export default function AIAnalysisPanel({ chart, apiKey }: AIAnalysisPanelProps)
         {!analysis && !loading && (
           <Button
             onClick={handleAnalyze}
-            disabled={!chart || !apiKey || loading}
+            disabled={!chart || loading}
             className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold"
           >
             {loading ? (
