@@ -82,7 +82,12 @@ ${JSON.stringify(chartData, null, 2)}
     ]);
 
     const responseText = response.response.text();
-    const analysisData = JSON.parse(responseText);
+    // 清理 Gemini 回傳的 JSON 中可能包含的控制字元
+    const sanitizedText = responseText.replace(/[\x00-\x1F\x7F]/g, (ch: string) => {
+      if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
+      return '';
+    });
+    const analysisData = JSON.parse(sanitizedText);
 
     const endTime = Date.now();
     const responseTime = endTime - startTime;
@@ -107,7 +112,7 @@ ${JSON.stringify(chartData, null, 2)}
       ...analysisData,
       metadata: {
         analysis_timestamp: new Date().toISOString(),
-        model_used: 'gemini-1.5-pro',
+        model_used: 'gemini-2.5-flash',
         tokens_used: tokensUsed,
         cache_hit: false,
         response_time_ms: responseTime,
