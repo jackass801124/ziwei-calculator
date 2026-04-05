@@ -1,79 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
-/**
- * 安全地解析 Gemini 回傳的 JSON，包含多層修復邏輯。
- * 無論如何都不會拋出例外，保證回傳一個物件。
- */
-function safeParseJSON(text: string): Record<string, unknown> {
-  // 第一層：直接解析
-  try {
-    return JSON.parse(text);
-  } catch (_e) {
-    // 繼續嘗試修復
-  }
-
-  // 第二層：移除控制字元後重試
-  const sanitized = text.replace(/[\x00-\x1F\x7F]/g, (ch) => {
-    if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
-    return '';
-  });
-  try {
-    return JSON.parse(sanitized);
-  } catch (_e) {
-    // 繼續嘗試修復
-  }
-
-  // 第三層：嘗試提取 JSON 物件
-  const jsonMatch = sanitized.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[0]);
-    } catch (_e) {
-      // 繼續嘗試修復
-    }
-  }
-
-  // 第四層：嘗試修復常見的截斷問題（補齊未關閉的括號）
-  if (jsonMatch) {
-    let truncated = jsonMatch[0];
-    // 計算未關閉的括號數量
-    let braceCount = 0;
-    let bracketCount = 0;
-    let inString = false;
-    let escape = false;
-    for (const c of truncated) {
-      if (escape) { escape = false; continue; }
-      if (c === '\\') { escape = true; continue; }
-      if (c === '"') { inString = !inString; continue; }
-      if (inString) continue;
-      if (c === '{') braceCount++;
-      if (c === '}') braceCount--;
-      if (c === '[') bracketCount++;
-      if (c === ']') bracketCount--;
-    }
-    // 如果在字串中被截斷，先關閉字串
-    if (inString) truncated += '"';
-    // 補齊未關閉的括號
-    for (let i = 0; i < bracketCount; i++) truncated += ']';
-    for (let i = 0; i < braceCount; i++) truncated += '}';
-    try {
-      return JSON.parse(truncated);
-    } catch (_e) {
-      // 最終fallback
-    }
-  }
-
-  // 所有修復都失敗，將原始文字作為分析結果回傳
-  return { raw_analysis: text };
-}
-
-/**
- * Vercel Serverless Function: /api/analyze
- * 將 Gemini AI 分析移至伺服器端，保護 API Key 不暴露於前端
- */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // 僅允許 POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -95,37 +23,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
       generationConfig: {
-        responseMimeType: 'application/json',
+        // 🚨 移除了 JSON 限制，讓它自由發揮純文字
         temperature: 0.7,
       },
       safetySettings: [
-        {
-          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-          threshold: HarmBlockThreshold.BLOCK_NONE,
-        },
-        {
-          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-          threshold: HarmBlockThreshold.BLOCK_NONE,
-        },
-        {
-          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-          threshold: HarmBlockThreshold.BLOCK_NONE,
-        },
-        {
-          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-          threshold: HarmBlockThreshold.BLOCK_NONE,
-        },
+        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
       ],
     });
 
     const systemInstruction = `你是資深的紫微斗數與易經命理分析官。
-      
-你的職責是：
+你的職責是基於用戶提供的命盤數據進行深度分析，並整合《紫微斗數全書》與《周易》的古籍智慧。
 1. 基於用戶提供的命盤數據進行深度分析
 2. 整合《紫微斗數全書》與《周易》的古籍智慧
-3. 提供結構化的 JSON 格式回應
-4. 識別命盤中的風險因素並評級（low/medium/high）
-5. 提供具體、可行的建議
+3. 提供具體、可行的建議
 
 分析維度：
 - 性格特質與人生底層架構
@@ -134,13 +47,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - 與父母與兄弟姊妹的關係
 - 2026-2030 年流年運勢預測
 
-回應必須是有效的 JSON 格式。`;
+【嚴格排版規定 - 非常重要】：
+1. 絕對不要輸出 JSON 格式！不要有任何 {} 或 "" 等程式碼符號。
+2. 絕對不要使用 Markdown 符號（如 #, *, -, \` 等）。
+3. 請使用「純中文長篇文章」的形式撰寫。
+4. 段落標題請務必使用全形中括號【】，例如：【性格特質與底層架構】、【事業前景與財富運勢】、【感情婚姻與人際關係】、【父母與手足關係】、【2026-2030 流年運勢】。
+5. 每個段落之間請空一行，保持版面乾淨易讀。`;
 
-    const userPrompt = `請分析以下命盤數據，並提供深度的紫微斗數與易經整合分析：
-
-${JSON.stringify(chartData, null, 2)}
-
-請按照 JSON Schema 結構回應，確保每個分析維度都充分詳盡。`;
+    const userPrompt = `請分析以下命盤數據，給出一份排版整齊、優美的中文命理分析報告：\n${JSON.stringify(chartData)}`;
 
     const response = await model.generateContent([
       { text: systemInstruction },
@@ -153,15 +67,11 @@ ${JSON.stringify(chartData, null, 2)}
     const responseTime = endTime - startTime;
     const tokensUsed = Math.ceil(responseText.length / 4);
 
-    // 安全地解析 Gemini 回傳的 JSON
-    const analysisData = safeParseJSON(responseText);
-
-    // 評估風險等級
-    const analysisText = JSON.stringify(analysisData).toLowerCase();
+    // 評估風險等級 (直接從純文字中判斷)
     let warningLevel: 'low' | 'medium' | 'high' = 'low';
-    if (analysisText.includes('化忌') || analysisText.includes('陷地') || analysisText.includes('煞星')) {
+    if (responseText.includes('化忌') || responseText.includes('陷地') || responseText.includes('煞星')) {
       warningLevel = 'high';
-    } else if (analysisText.includes('平地') || analysisText.includes('挑戰')) {
+    } else if (responseText.includes('平地') || responseText.includes('挑戰')) {
       warningLevel = 'medium';
     }
 
@@ -171,20 +81,18 @@ ${JSON.stringify(chartData, null, 2)}
       low: '命盤整體風險較低，可按計畫推進。',
     };
 
-    const fullResponse = {
-      ...analysisData,
+    // 將「純文字報告」與「系統資訊」包裝後回傳給前端
+    return res.status(200).json({
+      analysis_text: responseText,
       metadata: {
-        analysis_timestamp: new Date().toISOString(),
         model_used: 'gemini-2.5-flash',
         tokens_used: tokensUsed,
-        cache_hit: false,
         response_time_ms: responseTime,
         warning_level: warningLevel,
         risk_assessment: riskMessages[warningLevel],
       },
-    };
+    });
 
-    return res.status(200).json(fullResponse);
   } catch (error) {
     console.error('Gemini 分析失敗:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
