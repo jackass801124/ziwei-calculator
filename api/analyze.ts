@@ -1,24 +1,30 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
-// 宮位名稱映射（地支 → 宮位名稱）
+// 宮位名稱映射（按逆時針順序）
 const PALACE_NAMES = [
   '命宮', '兄弟宮', '夫妻宮', '子女宮',
   '財帛宮', '疾厄宮', '遷移宮', '交友宮',
   '事業宮', '田宅宮', '福德宮', '父母宮',
 ] as const;
 
+// 地支順序（順時針）
 const DIZHI_ORDER = ['寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥', '子', '丑'] as const;
 
 /**
  * 根據命宮地支和當前地支，計算宮位名稱
+ * 紫微斗數的宮位是逆時針排列的：命宮 → 兄弟宮 → 夫妻宮 → ...
+ * 但地支是順時針的：寅 → 卯 → 辰 → ...
+ * 所以需要用 (mingGongIndex - currentIndex) 來計算
  */
 function getPalaceName(mingGongDizhi: string, currentDizhi: string): string {
   const mingGongIndex = DIZHI_ORDER.indexOf(mingGongDizhi as any);
   const currentIndex = DIZHI_ORDER.indexOf(currentDizhi as any);
   
-  // 逆時針排列：命宮是起點，往前數（地支往後）
-  const nameIndex = (currentIndex - mingGongIndex + 12) % 12;
+  // 逆時針排列：命宮是起點(0)，往前數（地支往後）
+  // 例：命宮在丑(11)，申(8)應該是第幾宮？
+  // 從丑逆時針到申：丑 → 子 → 亥 → 戌 → 酉 → 申 = 5格 = 疾厄宮(5)
+  const nameIndex = (mingGongIndex - currentIndex + 12) % 12;
   return PALACE_NAMES[nameIndex];
 }
 

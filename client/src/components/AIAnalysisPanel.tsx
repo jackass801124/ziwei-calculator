@@ -82,7 +82,7 @@ export default function AIAnalysisPanel({ chart }: AIAnalysisPanelProps) {
         {loading && (
           <div className="flex flex-col items-center justify-center py-12 space-y-4">
             <Loader2 className="h-10 w-10 animate-spin text-yellow-500" />
-            <span className="text-yellow-500 font-medium tracking-widest animate-pulse">老祖正在推演命盤，請稍候.....</span>
+            <span className="text-yellow-500 font-medium tracking-widest animate-pulse">老祖正在推演命盤，請稍候.......</span>
           </div>
         )}
 
