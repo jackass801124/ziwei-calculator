@@ -2,6 +2,73 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
 /**
+ * 安全地解析 Gemini 回傳的 JSON，包含多層修復邏輯。
+ * 無論如何都不會拋出例外，保證回傳一個物件。
+ */
+function safeParseJSON(text: string): Record<string, unknown> {
+  // 第一層：直接解析
+  try {
+    return JSON.parse(text);
+  } catch (_e) {
+    // 繼續嘗試修復
+  }
+
+  // 第二層：移除控制字元後重試
+  const sanitized = text.replace(/[\x00-\x1F\x7F]/g, (ch) => {
+    if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
+    return '';
+  });
+  try {
+    return JSON.parse(sanitized);
+  } catch (_e) {
+    // 繼續嘗試修復
+  }
+
+  // 第三層：嘗試提取 JSON 物件
+  const jsonMatch = sanitized.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch (_e) {
+      // 繼續嘗試修復
+    }
+  }
+
+  // 第四層：嘗試修復常見的截斷問題（補齊未關閉的括號）
+  if (jsonMatch) {
+    let truncated = jsonMatch[0];
+    // 計算未關閉的括號數量
+    let braceCount = 0;
+    let bracketCount = 0;
+    let inString = false;
+    let escape = false;
+    for (const c of truncated) {
+      if (escape) { escape = false; continue; }
+      if (c === '\\') { escape = true; continue; }
+      if (c === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (c === '{') braceCount++;
+      if (c === '}') braceCount--;
+      if (c === '[') bracketCount++;
+      if (c === ']') bracketCount--;
+    }
+    // 如果在字串中被截斷，先關閉字串
+    if (inString) truncated += '"';
+    // 補齊未關閉的括號
+    for (let i = 0; i < bracketCount; i++) truncated += ']';
+    for (let i = 0; i < braceCount; i++) truncated += '}';
+    try {
+      return JSON.parse(truncated);
+    } catch (_e) {
+      // 最終fallback
+    }
+  }
+
+  // 所有修復都失敗，將原始文字作為分析結果回傳
+  return { raw_analysis: text };
+}
+
+/**
  * Vercel Serverless Function: /api/analyze
  * 將 Gemini AI 分析移至伺服器端，保護 API Key 不暴露於前端
  */
@@ -30,7 +97,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.7,
-        maxOutputTokens: 8000,
       },
       safetySettings: [
         {
@@ -87,33 +153,8 @@ ${JSON.stringify(chartData, null, 2)}
     const responseTime = endTime - startTime;
     const tokensUsed = Math.ceil(responseText.length / 4);
 
-    // 嘗試解析 Gemini 回傳的 JSON，包含多層修復邏輯
-    let analysisData: Record<string, unknown>;
-    try {
-      analysisData = JSON.parse(responseText);
-    } catch {
-      // 第一次修復：移除控制字元後重試
-      const sanitized = responseText.replace(/[\x00-\x1F\x7F]/g, (ch: string) => {
-        if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
-        return '';
-      });
-      try {
-        analysisData = JSON.parse(sanitized);
-      } catch {
-        // 第二次修復：嘗試提取 JSON 物件（處理 Gemini 在 JSON 前後加入額外文字的情況）
-        const jsonMatch = sanitized.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            analysisData = JSON.parse(jsonMatch[0]);
-          } catch {
-            // 所有修復都失敗，將原始文字作為分析結果回傳
-            analysisData = { raw_analysis: responseText };
-          }
-        } else {
-          analysisData = { raw_analysis: responseText };
-        }
-      }
-    }
+    // 安全地解析 Gemini 回傳的 JSON
+    const analysisData = safeParseJSON(responseText);
 
     // 評估風險等級
     const analysisText = JSON.stringify(analysisData).toLowerCase();
